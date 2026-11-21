@@ -13,6 +13,10 @@ on:
         description: Record the sample window during the mouse and keyboard test
         type: boolean
         default: false
+      full_hd:
+        description: Switch the runner display to 1920 x 1080 and test the Full HD form
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -46,6 +50,11 @@ jobs:
           }
           dotnet --version
 
+      - name: Set and verify Full HD display
+        if: ${{ inputs.full_hd }}
+        shell: pwsh
+        run: ./scripts/Set-FullHdDisplay.ps1
+
       - name: Build .NET Framework 4.8 app and tests
         run: dotnet build $env:E2E_PROJECT -c Release
 
@@ -69,6 +78,7 @@ jobs:
       - name: Run FlaUI tests
         shell: pwsh
         env:
+          E2E_FULL_HD: ${{ inputs.full_hd }}
           E2E_SCREENSHOT_PATH: ${{ inputs.capture_screenshot && format('{0}/winforms-e2e.png', runner.temp) || '' }}
           E2E_VIDEO_PATH: ${{ inputs.capture_video && format('{0}/winforms-e2e.mp4', runner.temp) || '' }}
         run: |
@@ -101,6 +111,8 @@ jobs:
       - name: Summarize both test results
         if: ${{ !cancelled() }}
         shell: pwsh
+        env:
+          E2E_FULL_HD: ${{ inputs.full_hd }}
         run: |
           $expectedTests = [ordered]@{
             UiaPatterns_UpdateResult = 'UI Automation (SetValue and Invoke)'
@@ -115,6 +127,8 @@ jobs:
 
           $summary = @(
             '## WinForms E2E on windows-2025'
+            ''
+            $(if ($env:E2E_FULL_HD -eq 'true') { 'Full HD scenario (1920 x 1080)' } else { 'Standard scenario' })
             ''
             '| Interaction | Outcome |'
             '| --- | --- |'

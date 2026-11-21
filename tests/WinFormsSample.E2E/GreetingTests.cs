@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Threading;
 using FlaUI.Core;
 using FlaUI.Core.AutomationElements;
@@ -21,6 +22,10 @@ namespace WinFormsSample.E2E
         private const string Greeting = "Hello, FlaUI!";
         private static readonly TimeSpan StartupTimeout = TimeSpan.FromSeconds(15);
         private static readonly TimeSpan UiTimeout = TimeSpan.FromSeconds(5);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool SetProcessDPIAware();
 
         public TestContext TestContext { get; set; }
 
@@ -70,9 +75,16 @@ namespace WinFormsSample.E2E
 
             var samplePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "WinFormsSample.exe");
             Assert.IsTrue(File.Exists(samplePath), $"Sample executable is missing: {samplePath}");
-            TestContext.WriteLine("Launching WinFormsSample.exe.");
+            var fullHd = bool.TryParse(Environment.GetEnvironmentVariable("E2E_FULL_HD"), out var enabled) && enabled;
+            if (fullHd)
+            {
+                SetProcessDPIAware();
+            }
+
+            var arguments = fullHd ? "--full-hd" : string.Empty;
+            TestContext.WriteLine($"Launching WinFormsSample.exe {arguments}");
             using (var automation = new UIA3Automation())
-            using (var app = Application.Launch(samplePath))
+            using (var app = Application.Launch(samplePath, arguments))
             {
                 try
                 {
@@ -83,6 +95,21 @@ namespace WinFormsSample.E2E
                     var input = FindControl(window, "Name input").AsTextBox();
                     var button = FindControl(window, "Greet").AsButton();
                     var result = FindControl(window, "Greeting result").AsTextBox();
+                    if (fullHd)
+                    {
+                        var bounds = window.BoundingRectangle;
+                        TestContext.WriteLine($"Full HD window: {bounds.Width} x {bounds.Height} pixels at ({bounds.X}, {bounds.Y}).");
+                        Assert.AreEqual(1920, bounds.Width, "Full HD window width in screen pixels.");
+                        Assert.AreEqual(1080, bounds.Height, "Full HD window height in screen pixels.");
+                        foreach (var control in new AutomationElement[] { input, button, result })
+                        {
+                            var controlBounds = control.BoundingRectangle;
+                            TestContext.WriteLine($"{control.Name}: screen rectangle {controlBounds}.");
+                            Assert.IsTrue(controlBounds.Left - bounds.Left >= 1024 && controlBounds.Top - bounds.Top >= 768 &&
+                                bounds.Contains(controlBounds), $"{control.Name} must fit in the window beyond the 1024 x 768 area.");
+                        }
+                    }
+
                     Assert.AreEqual(string.Empty, input.Text, "The name input must start empty.");
                     Assert.AreEqual(string.Empty, result.Text, "The greeting must start empty.");
 
