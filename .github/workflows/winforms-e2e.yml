@@ -40,6 +40,10 @@ jobs:
           Write-Host "Windows version: $([Environment]::OSVersion.VersionString)"
           Write-Host "Shell session ID: $((Get-Process -Id $PID).SessionId)"
           Write-Host "Shell user interactive: $([Environment]::UserInteractive)"
+          Add-Type -AssemblyName System.Windows.Forms
+          foreach ($screen in [System.Windows.Forms.Screen]::AllScreens) {
+            Write-Host "Display $($screen.DeviceName): $($screen.Bounds.Width) x $($screen.Bounds.Height) pixels (primary: $($screen.Primary))"
+          }
           dotnet --version
 
       - name: Build .NET Framework 4.8 app and tests
