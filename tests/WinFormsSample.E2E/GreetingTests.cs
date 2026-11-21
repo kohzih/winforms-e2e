@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Threading;
 using FlaUI.Core;
 using FlaUI.Core.AutomationElements;
 using FlaUI.Core.Capturing;
@@ -57,10 +58,10 @@ namespace WinFormsSample.E2E
 
                 TestContext.WriteLine("Clicking Greet with FlaUI mouse input.");
                 button.Click();
-            }, captureScreenshot: true);
+            }, captureMedia: true);
         }
 
-        private void VerifyGreeting(Action<Window, TextBox, Button> interact, bool captureScreenshot = false)
+        private void VerifyGreeting(Action<Window, TextBox, Button> interact, bool captureMedia = false)
         {
             using (var testProcess = Process.GetCurrentProcess())
             {
@@ -85,17 +86,75 @@ namespace WinFormsSample.E2E
                     Assert.AreEqual(string.Empty, input.Text, "The name input must start empty.");
                     Assert.AreEqual(string.Empty, result.Text, "The greeting must start empty.");
 
-                    interact(window, input, button);
-                    WaitForText(result, Greeting, "Greeting display after activating the button");
-
-                    if (captureScreenshot)
+                    void VerifyResult()
                     {
+                        interact(window, input, button);
+                        WaitForText(result, Greeting, "Greeting display after activating the button");
+                    }
+
+                    if (captureMedia)
+                    {
+                        RecordVideo(app.MainWindowHandle, VerifyResult);
                         SaveScreenshot(window);
+                    }
+                    else
+                    {
+                        VerifyResult();
                     }
                 }
                 finally
                 {
                     app.Close();
+                }
+            }
+        }
+
+        private static void RecordVideo(IntPtr windowHandle, Action verifyResult)
+        {
+            var videoPath = Environment.GetEnvironmentVariable("E2E_VIDEO_PATH");
+            if (string.IsNullOrWhiteSpace(videoPath))
+            {
+                verifyResult();
+                return;
+            }
+
+            Assert.AreNotEqual(IntPtr.Zero, windowHandle, "The sample does not have a window to record.");
+            var startInfo = new ProcessStartInfo
+            {
+                FileName = "ffmpeg.exe",
+                Arguments = "-hide_banner -loglevel error -y -f gdigrab -framerate 15 -draw_mouse 1 " +
+                    $"-i hwnd=0x{windowHandle.ToInt64():X} -t 15 -vf pad=ceil(iw/2)*2:ceil(ih/2)*2 " +
+                    $"-c:v libx264 -pix_fmt yuv420p -movflags +faststart \"{videoPath}\"",
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardInput = true
+            };
+
+            using (var recorder = Process.Start(startInfo))
+            {
+                try
+                {
+                    // Leave the empty and completed form visible in the recording.
+                    Thread.Sleep(1000);
+                    verifyResult();
+                    Thread.Sleep(1250);
+
+                    if (!recorder.HasExited)
+                    {
+                        recorder.StandardInput.WriteLine("q");
+                        recorder.StandardInput.Flush();
+                    }
+
+                    Assert.IsTrue(recorder.WaitForExit(5000), "FFmpeg did not finish saving the recording.");
+                    Assert.AreEqual(0, recorder.ExitCode, "FFmpeg failed to record the sample window.");
+                }
+                finally
+                {
+                    if (!recorder.HasExited)
+                    {
+                        recorder.Kill();
+                        recorder.WaitForExit(5000);
+                    }
                 }
             }
         }

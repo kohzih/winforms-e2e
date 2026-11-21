@@ -38,3 +38,21 @@ if (-not $capture) { throw 'スクリーンショットがログにありませ�
 $png = [Convert]::FromBase64String($capture.Matches[0].Groups[1].Value)
 [IO.File]::WriteAllBytes((Join-Path (Get-Location) 'winforms-e2e.png'), $png)
 ```
+
+### 操作を動画に記録
+
+手動実行で `capture_video` を有効にすると、FFmpeg がサンプルのウィンドウ内を録画します。空の画面から FlaUI のマウスクリック、キー入力、結果表示までを無音の MP4 にします。動画はジョブログから復元する方式なので、成果物ストレージの使用量には加算されません。
+
+```powershell
+$runId = '<実行 ID>'
+$log = gh run view $runId --repo kohzih/winforms-e2e --log
+$chunks = $log | Select-String 'WINFORMS_VIDEO_MP4_BASE64=([A-Za-z0-9+/=]+)$'
+$checksum = $log | Select-String 'WINFORMS_VIDEO_MP4_SHA256=([0-9A-F]{64})$' | Select-Object -Last 1
+if (-not $chunks -or -not $checksum) { throw '動画がログにありません。' }
+$encoded = ($chunks | ForEach-Object { $_.Matches[0].Groups[1].Value }) -join ''
+$path = Join-Path (Get-Location) 'winforms-e2e.mp4'
+[IO.File]::WriteAllBytes($path, [Convert]::FromBase64String($encoded))
+if ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -ne $checksum.Matches[0].Groups[1].Value) {
+    throw '動画のチェックサムが一致しません。'
+}
+```

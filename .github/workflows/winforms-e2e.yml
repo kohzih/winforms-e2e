@@ -9,6 +9,10 @@ on:
         description: Capture the sample window after the mouse and keyboard test
         type: boolean
         default: false
+      capture_video:
+        description: Record the sample window during the mouse and keyboard test
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -41,10 +45,28 @@ jobs:
       - name: Build .NET Framework 4.8 app and tests
         run: dotnet build $env:E2E_PROJECT -c Release
 
+      - name: Prepare FFmpeg for window recording
+        if: ${{ inputs.capture_video }}
+        shell: pwsh
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP 'ffmpeg-9.0.1.7z'
+          $url = 'https://github.com/GyanD/codexffmpeg/releases/download/9.0.1/ffmpeg-9.0.1-essentials_build.7z'
+          $sha256 = '49a73bdf0850092a252ac4641d922f3048d63ed113e196cc65ce1e4f7fb33e85'
+          curl.exe --fail --location --silent --show-error --output $archive $url
+          if ($LASTEXITCODE -ne 0) { throw 'Could not download FFmpeg.' }
+          if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne $sha256) {
+            throw 'FFmpeg archive checksum mismatch.'
+          }
+          tar.exe -xf $archive -C $env:RUNNER_TEMP
+          if ($LASTEXITCODE -ne 0) { throw 'Could not extract FFmpeg.' }
+          Join-Path $env:RUNNER_TEMP 'ffmpeg-9.0.1-essentials_build/bin' |
+            Add-Content -LiteralPath $env:GITHUB_PATH -Encoding utf8
+
       - name: Run FlaUI tests
         shell: pwsh
         env:
           E2E_SCREENSHOT_PATH: ${{ inputs.capture_screenshot && format('{0}/winforms-e2e.png', runner.temp) || '' }}
+          E2E_VIDEO_PATH: ${{ inputs.capture_video && format('{0}/winforms-e2e.mp4', runner.temp) || '' }}
         run: |
           dotnet test $env:E2E_PROJECT -c Release --no-build `
             --logger 'console;verbosity=detailed' `
@@ -59,6 +81,18 @@ jobs:
           $screenshotPath = Join-Path $env:RUNNER_TEMP 'winforms-e2e.png'
           $png = [Convert]::ToBase64String([IO.File]::ReadAllBytes($screenshotPath))
           Write-Host "WINFORMS_SCREENSHOT_PNG_BASE64=$png"
+
+      - name: Record video in the job log
+        if: ${{ inputs.capture_video }}
+        shell: pwsh
+        run: |
+          $videoPath = Join-Path $env:RUNNER_TEMP 'winforms-e2e.mp4'
+          $video = [Convert]::ToBase64String([IO.File]::ReadAllBytes($videoPath))
+          for ($offset = 0; $offset -lt $video.Length; $offset += 4096) {
+            $chunk = $video.Substring($offset, [Math]::Min(4096, $video.Length - $offset))
+            Write-Host "WINFORMS_VIDEO_MP4_BASE64=$chunk"
+          }
+          Write-Host "WINFORMS_VIDEO_MP4_SHA256=$((Get-FileHash -LiteralPath $videoPath -Algorithm SHA256).Hash)"
 
       - name: Summarize both test results
         if: ${{ !cancelled() }}
