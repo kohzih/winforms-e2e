@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.IO;
 using FlaUI.Core;
 using FlaUI.Core.AutomationElements;
+using FlaUI.Core.Capturing;
 using FlaUI.Core.Input;
 using FlaUI.Core.Tools;
 using FlaUI.UIA3;
@@ -42,9 +43,12 @@ namespace WinFormsSample.E2E
             VerifyGreeting((window, input, button) =>
             {
                 TestContext.WriteLine("Bringing the window forward and clicking the input.");
-                window.Focus();
-                input.Click();
-                var focus = Retry.WhileFalse(() => input.Properties.HasKeyboardFocus.Value, UiTimeout);
+                var focus = Retry.WhileFalse(() =>
+                {
+                    window.Focus();
+                    input.Click();
+                    return input.Properties.HasKeyboardFocus.Value;
+                }, UiTimeout, TimeSpan.FromMilliseconds(250));
                 Assert.IsTrue(focus.Result, "The input did not receive keyboard focus after the click.");
 
                 TestContext.WriteLine("Typing into the input with FlaUI Keyboard.Type.");
@@ -53,10 +57,10 @@ namespace WinFormsSample.E2E
 
                 TestContext.WriteLine("Clicking Greet with FlaUI mouse input.");
                 button.Click();
-            });
+            }, captureScreenshot: true);
         }
 
-        private void VerifyGreeting(Action<Window, TextBox, Button> interact)
+        private void VerifyGreeting(Action<Window, TextBox, Button> interact, bool captureScreenshot = false)
         {
             using (var testProcess = Process.GetCurrentProcess())
             {
@@ -66,21 +70,47 @@ namespace WinFormsSample.E2E
             var samplePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "WinFormsSample.exe");
             Assert.IsTrue(File.Exists(samplePath), $"Sample executable is missing: {samplePath}");
             TestContext.WriteLine("Launching WinFormsSample.exe.");
-            using (var app = Application.Launch(samplePath))
             using (var automation = new UIA3Automation())
+            using (var app = Application.Launch(samplePath))
             {
-                TestContext.WriteLine($"Waiting for the main window of PID {app.ProcessId}.");
-                var window = app.GetMainWindow(automation, StartupTimeout);
-                Assert.IsNotNull(window, "The sample app's main window did not appear.");
+                try
+                {
+                    TestContext.WriteLine($"Waiting for the main window of PID {app.ProcessId}.");
+                    var window = app.GetMainWindow(automation, StartupTimeout);
+                    Assert.IsNotNull(window, "The sample app's main window did not appear.");
 
-                var input = FindControl(window, "Name input").AsTextBox();
-                var button = FindControl(window, "Greet").AsButton();
-                var result = FindControl(window, "Greeting result").AsTextBox();
-                Assert.AreEqual(string.Empty, input.Text, "The name input must start empty.");
-                Assert.AreEqual(string.Empty, result.Text, "The greeting must start empty.");
+                    var input = FindControl(window, "Name input").AsTextBox();
+                    var button = FindControl(window, "Greet").AsButton();
+                    var result = FindControl(window, "Greeting result").AsTextBox();
+                    Assert.AreEqual(string.Empty, input.Text, "The name input must start empty.");
+                    Assert.AreEqual(string.Empty, result.Text, "The greeting must start empty.");
 
-                interact(window, input, button);
-                WaitForText(result, Greeting, "Greeting display after activating the button");
+                    interact(window, input, button);
+                    WaitForText(result, Greeting, "Greeting display after activating the button");
+
+                    if (captureScreenshot)
+                    {
+                        SaveScreenshot(window);
+                    }
+                }
+                finally
+                {
+                    app.Close();
+                }
+            }
+        }
+
+        private static void SaveScreenshot(Window window)
+        {
+            var screenshotPath = Environment.GetEnvironmentVariable("E2E_SCREENSHOT_PATH");
+            if (string.IsNullOrWhiteSpace(screenshotPath))
+            {
+                return;
+            }
+
+            using (var screenshot = Capture.Element(window))
+            {
+                screenshot.ToFile(screenshotPath);
             }
         }
 

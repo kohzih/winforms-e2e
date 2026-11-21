@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      capture_screenshot:
+        description: Capture the sample window after the mouse and keyboard test
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -38,12 +43,22 @@ jobs:
 
       - name: Run FlaUI tests
         shell: pwsh
+        env:
+          E2E_SCREENSHOT_PATH: ${{ inputs.capture_screenshot && format('{0}/winforms-e2e.png', runner.temp) || '' }}
         run: |
           dotnet test $env:E2E_PROJECT -c Release --no-build `
             --logger 'console;verbosity=detailed' `
             --logger 'trx;LogFileName=e2e.trx' `
             --results-directory (Join-Path $env:RUNNER_TEMP 'WinFormsE2E') `
             -- RunConfiguration.TreatNoTestsAsError=true
+
+      - name: Record screenshot in the job log
+        if: ${{ inputs.capture_screenshot }}
+        shell: pwsh
+        run: |
+          $screenshotPath = Join-Path $env:RUNNER_TEMP 'winforms-e2e.png'
+          $png = [Convert]::ToBase64String([IO.File]::ReadAllBytes($screenshotPath))
+          Write-Host "WINFORMS_SCREENSHOT_PNG_BASE64=$png"
 
       - name: Summarize both test results
         if: ${{ !cancelled() }}
